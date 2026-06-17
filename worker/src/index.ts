@@ -29,6 +29,7 @@
  *   (cron) scheduled                       burndown: delete expired shares (objects + rows)
  */
 import { Hono } from 'hono'
+import { SHARE_UI_JS } from './share-ui-src'
 
 type Bindings = {
   DB: D1Database
@@ -172,6 +173,8 @@ app.get('/healthz', (c) => c.text('ok'))
 app.get('/favicon.ico', () => faviconResponse())
 app.get('/share.js', () =>
   new Response(SHARE_JS, { headers: { 'content-type': 'application/javascript; charset=utf-8' } }))
+app.get('/share-ui.js', () =>
+  new Response(SHARE_UI_JS, { headers: { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'public, max-age=300' } }))
 
 // ---- authed: the agent -----------------------------------------------------
 
