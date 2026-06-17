@@ -57,6 +57,10 @@ function authed(c: any): boolean {
   return !!c.env.SHARE_TOKEN && token === c.env.SHARE_TOKEN
 }
 
+// Slugs are minted by makeSlug() as [a-z0-9-]. Enforce that charset at every
+// boundary where a slug arrives from a URL, so a hostile slug can never reach the
+// HTML injection (XSS) or an R2 key. Anything else is treated as not-found.
+const okSlug = (s: string) => /^[a-zA-Z0-9-]{1,80}$/.test(s)
 const siteKey = (slug: string, path: string) => `sites/${slug}/${path.replace(/^\/+/, '')}`
 const looksHtml = (path: string, ct?: string | null) =>
   /\.html?$/i.test(path) || (ct || '').includes('text/html')
@@ -165,6 +169,7 @@ app.put('/api/shares/:slug/files/:path{.+}', async (c) => {
   if (!authed(c)) return c.json({ error: 'unauthorized' }, 401)
   const slug = c.req.param('slug')
   const path = c.req.param('path')
+  if (!okSlug(slug)) return c.json({ error: 'no such share' }, 404)
   const share = await getShare(c, slug)
   if (!share) return c.json({ error: 'no such share' }, 404)
   if (!c.req.raw.body) return c.json({ error: 'empty body' }, 400)
@@ -205,6 +210,7 @@ app.get('/api/shares/:id/responses', async (c) => {
 // Capture a response. Public — gated only by the (unguessable) slug.
 app.post('/:slug/respond', async (c) => {
   const slug = c.req.param('slug')
+  if (!okSlug(slug)) return c.json({ error: 'not found' }, 404)
   const share = await getShare(c, slug)
   if (!share) return c.json({ error: 'not found' }, 404)
   if (isExpired(share)) return c.json({ error: 'expired' }, 410)
@@ -227,6 +233,7 @@ app.get('/:slug', (c) => serveFile(c, c.req.param('slug'), 'index.html'))
 app.get('/:slug/:path{.+}', (c) => serveFile(c, c.req.param('slug'), c.req.param('path')))
 
 async function serveFile(c: any, slug: string, path: string): Promise<Response> {
+  if (!okSlug(slug)) return sysPage('Not found', 'This link is invalid.', 404)
   const share = await getShare(c, slug)
   if (!share) return sysPage('Not found', 'This link is invalid.', 404)
   if (isExpired(share)) return sysPage('Expired', 'This link has expired.', 410)
@@ -242,7 +249,9 @@ async function serveFile(c: any, slug: string, path: string): Promise<Response> 
   const headers = new Headers()
   obj.writeHttpMetadata(headers)
   headers.set('etag', obj.httpEtag)
-  headers.set('cache-control', 'public, max-age=31536000, immutable')
+  // NOT immutable: a share's files can be re-pushed to the same path, so assets
+  // must stay fresh. Short max-age keeps it cache-friendly without going stale.
+  headers.set('cache-control', 'public, max-age=60')
   return new Response(obj.body, { headers })
 }
 
