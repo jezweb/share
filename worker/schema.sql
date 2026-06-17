@@ -1,5 +1,7 @@
--- share — D1 schema. Plain DDL only (D1 rejects raw BEGIN TRANSACTION/COMMIT;
--- wrangler wraps each migration in its own transaction).
+-- share — D1 schema. Plain DDL only; wrangler wraps the file atomically itself.
+-- (Do not add explicit SQL transaction-control statements: D1 rejects them, AND
+-- wrangler's file parser scans comment text for those keywords, so even naming
+-- them here breaks `d1 execute --file`. Lived 2026-06-17.)
 
 -- A share is a FOLDER of files in R2 under sites/<slug>/. This table holds only
 -- the metadata; the page(s) and assets live in R2, served at the keyed URL.

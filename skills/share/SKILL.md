@@ -52,6 +52,23 @@ leave-a-note affordance.
 tokens in the HTML or the images. Crop for confidentiality, use seeded/dummy data
 where you can, match the link's audience to the data.
 
+## Images — three sources, one rule
+
+Whatever the source, **upload images as bytes** (`push.sh` walks a folder, or
+`curl PUT` a file): bytes go disk → HTTP → R2, never base64 into a tool call.
+
+- **Real screenshots / photos** — the most common. Capture with playwright, or the
+  fixer / walkabout recorder.
+- **Rendered graphics (keyless)** — charts, mockups, palettes, decision matrices:
+  write HTML, screenshot it to PNG. Deterministic, free, no key, accurate text.
+- **Generated images** — `scripts/genimage.mjs` (one OpenRouter call; set
+  `OPENROUTER_API_KEY` to a **designated** key, never a client's). **Pick the model
+  by the job:** a cheap fast one (`black-forest-labs/flux.2-klein-4b`) is fine for
+  *decorative* images, but it mangles text — when there's **text in the image or
+  accuracy matters** (a real label, a UI mock, a logo with words), use a strong
+  model (`google/gemini-3-pro-image-preview` for text rendering, `openai/gpt-5-image`
+  for instruction-following). Default is `google/gemini-3.1-flash-image-preview`.
+
 ## 1 — Single page (the common case)
 
 POST the finished HTML; you get one unguessable link back.

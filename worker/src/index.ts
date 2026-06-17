@@ -66,15 +66,18 @@ const getShare = (c: any, slug: string): Promise<ShareRow | null> =>
   c.env.DB.prepare('SELECT id, expires_at, meta FROM shares WHERE slug = ?').bind(slug).first()
 const isExpired = (s: ShareRow) => !!s.expires_at && s.expires_at < now()
 
-// Inject the per-page config + the helper so any HTML page in the site can call
-// share.submit() without knowing its own slug.
+// Inject, right after <head>: a <base> so relative URLs (sub-pages, css, images)
+// resolve UNDER the share's folder, plus the config + helper so any page can call
+// share.submit() without knowing its own slug. The <base> must come first so it
+// governs every relative reference that follows.
 function injectShareRuntime(html: string, slug: string): string {
-  const tag =
-    `\n<script>window.__SHARE__=${JSON.stringify({ slug })};</script>` +
-    `\n<script src="/share.js"></script>\n`
-  if (html.includes('</head>')) return html.replace('</head>', `${tag}</head>`)
-  if (html.includes('</body>')) return html.replace('</body>', `${tag}</body>`)
-  return html + tag
+  const inject =
+    `<base href="/${slug}/">` +
+    `<script>window.__SHARE__=${JSON.stringify({ slug })};</script>` +
+    `<script src="/share.js"></script>`
+  if (html.includes('<head>')) return html.replace('<head>', `<head>${inject}`)
+  if (html.includes('</head>')) return html.replace('</head>', `${inject}</head>`)
+  return inject + html
 }
 
 const SHARE_JS = `// share.js — the one contract every artifact uses to report home.

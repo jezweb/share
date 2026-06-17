@@ -17,7 +17,7 @@ TITLE="${2:-${DIR##*/}}"
 : "${SHARE_BASE:?set SHARE_BASE}"; : "${SHARE_TOKEN:?set SHARE_TOKEN}"
 [ -d "$DIR" ] || { echo "no such dir: $DIR" >&2; exit 1; }
 
-mime() { case "${1,,}" in
+mime() { case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
   *.html|*.htm) echo text/html;;        *.css) echo text/css;;
   *.js|*.mjs) echo application/javascript;; *.json) echo application/json;;
   *.png) echo image/png;;               *.jpg|*.jpeg) echo image/jpeg;;
