@@ -37,6 +37,12 @@ share, read responses) is tiny JSON. Data plane (images, video) goes disk → HT
 - `SHARE_BASE` — e.g. `https://share.jezweb.com`
 - `SHARE_TOKEN` — the bearer secret for the authed `/api/*` calls (never in a page)
 
+Two ways to drive it, same API underneath:
+- **MCP tools** (the plugin ships an MCP server) — `share_publish` (html or a local
+  `dir`), `share_responses`, `share_files`, `share_retire`. Cleanest for most calls.
+- **curl / the scripts** (`push.sh`, `responses.sh`) — when you want shell control
+  or to pipe bytes. The examples below use curl; the MCP tools mirror them.
+
 ## A share is a folder, not a file
 
 A single page or a whole multi-page site (pages, CSS, JS, images, video) under one

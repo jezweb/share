@@ -8,5 +8,15 @@
   },
   "license": "MIT",
   "homepage": "https://github.com/jezweb/share",
-  "repository": "https://github.com/jezweb/share"
+  "repository": "https://github.com/jezweb/share",
+  "mcpServers": {
+    "share": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"],
+      "env": {
+        "SHARE_BASE": "${SHARE_BASE}",
+        "SHARE_TOKEN": "${SHARE_TOKEN}"
+      }
+    }
+  }
 }
