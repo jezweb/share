@@ -66,9 +66,13 @@
       box.innerHTML='<textarea placeholder="What needs to change here?"></textarea>'+
         '<div class="row"><button class="cancel">cancel</button><button class="save">add pin</button></div>';
       stage.appendChild(box); openEditor=box;
+      // Clicks INSIDE the editor must not bubble to the stage — otherwise the
+      // save/cancel click re-opens a phantom editor and the next pin breaks.
+      box.addEventListener('click', function(ev){ ev.stopPropagation(); });
       var ta=box.querySelector('textarea'); ta.focus();
-      box.querySelector('.cancel').onclick=function(){ box.remove(); openEditor=null; };
-      box.querySelector('.save').onclick=function(){
+      box.querySelector('.cancel').onclick=function(ev){ ev.stopPropagation(); box.remove(); openEditor=null; };
+      box.querySelector('.save').onclick=function(ev){
+        ev.stopPropagation();
         var text=ta.value.trim(); if(!text){ ta.focus(); return; }
         box.remove(); openEditor=null; addPin(x,y,text);
       };
