@@ -17,16 +17,29 @@ TITLE="${2:-${DIR##*/}}"
 : "${SHARE_BASE:?set SHARE_BASE}"; : "${SHARE_TOKEN:?set SHARE_TOKEN}"
 [ -d "$DIR" ] || { echo "no such dir: $DIR" >&2; exit 1; }
 
-mime() { case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-  *.html|*.htm) echo text/html;;        *.css) echo text/css;;
-  *.js|*.mjs) echo application/javascript;; *.json) echo application/json;;
-  *.png) echo image/png;;               *.jpg|*.jpeg) echo image/jpeg;;
-  *.gif) echo image/gif;;               *.svg) echo image/svg+xml;;
-  *.webp) echo image/webp;;             *.ico) echo image/x-icon;;
-  *.mp4) echo video/mp4;;               *.webm) echo video/webm;;
-  *.pdf) echo application/pdf;;          *.woff2) echo font/woff2;;
-  *.txt|*.md) echo "text/plain; charset=utf-8";; *) echo application/octet-stream;;
+# Sniff binary images by magic bytes so a mislabelled extension (e.g. JPEG
+# bytes saved as .png by an image model) still gets the correct content-type.
+sniff() { case "$(head -c 12 "$1" | od -An -tx1 | tr -d ' \n')" in
+  89504e47*) echo image/png;;           ffd8ff*) echo image/jpeg;;
+  47494638*) echo image/gif;;           *57454250) echo image/webp;;  # RIFF....WEBP
+  *) echo "";;
 esac; }
+
+mime() { local m
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    *.html|*.htm) m=text/html;;            *.css) m=text/css;;
+    *.js|*.mjs) m=application/javascript;; *.json) m=application/json;;
+    *.png) m=image/png;;                   *.jpg|*.jpeg) m=image/jpeg;;
+    *.gif) m=image/gif;;                    *.svg) m=image/svg+xml;;
+    *.webp) m=image/webp;;                  *.ico) m=image/x-icon;;
+    *.mp4) m=video/mp4;;                    *.webm) m=video/webm;;
+    *.pdf) m=application/pdf;;              *.woff2) m=font/woff2;;
+    *.txt|*.md) m="text/plain; charset=utf-8";; *) m=application/octet-stream;;
+  esac
+  # For raster image extensions, trust the bytes over the name.
+  case "$m" in image/png|image/jpeg|image/gif|image/webp)
+    local r; r="$(sniff "$1")"; [ -n "$r" ] && m="$r";; esac
+  printf '%s' "$m"; }
 
 # Reuse a share if SHARE_SLUG is set, else create a fresh one.
 if [ -n "${SHARE_SLUG:-}" ]; then
