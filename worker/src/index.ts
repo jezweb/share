@@ -102,6 +102,23 @@ const SHARE_JS = `// share.js — the one contract every artifact uses to report
 })();
 `
 
+// A default favicon so every share has one without authoring it (and browsers
+// stop logging a 404 for /favicon.ico). A share can still override it by
+// shipping its own favicon at the requested path. SVG renders crisp at any size.
+const DEFAULT_FAVICON =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
+  `<rect width="32" height="32" rx="7" fill="#5c8aff"/>` +
+  `<g fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">` +
+  `<circle cx="22" cy="9" r="2.6" fill="#fff" stroke="none"/>` +
+  `<circle cx="10" cy="16" r="2.6" fill="#fff" stroke="none"/>` +
+  `<circle cx="22" cy="23" r="2.6" fill="#fff" stroke="none"/>` +
+  `<path d="M12.3 14.7 19.7 10.3M12.3 17.3 19.7 21.7"/></g></svg>`
+const faviconResponse = () =>
+  new Response(DEFAULT_FAVICON, {
+    headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' },
+  })
+const isFaviconPath = (path: string) => /(^|\/)favicon\.(ico|svg)$/i.test(path)
+
 function sysPage(title: string, body: string, status: number) {
   return new Response(
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>` +
@@ -114,6 +131,7 @@ function sysPage(title: string, body: string, status: number) {
 // ---- public: helper + liveness ---------------------------------------------
 
 app.get('/healthz', (c) => c.text('ok'))
+app.get('/favicon.ico', () => faviconResponse())
 app.get('/share.js', () =>
   new Response(SHARE_JS, { headers: { 'content-type': 'application/javascript; charset=utf-8' } }))
 
@@ -239,7 +257,12 @@ async function serveFile(c: any, slug: string, path: string): Promise<Response> 
   if (isExpired(share)) return sysPage('Expired', 'This link has expired.', 410)
 
   const obj = await c.env.ASSETS.get(siteKey(slug, path))
-  if (!obj) return sysPage('Not found', 'Nothing here.', 404)
+  if (!obj) {
+    // A share that didn't ship its own favicon still gets the default one,
+    // rather than a 404 the browser logs on every page view.
+    if (isFaviconPath(path)) return faviconResponse()
+    return sysPage('Not found', 'Nothing here.', 404)
+  }
 
   const ct = obj.httpMetadata?.contentType
   if (looksHtml(path, ct)) {
