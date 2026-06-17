@@ -120,6 +120,22 @@ const SHARE_JS = `// share.js — the one contract every artifact uses to report
     submit: function (payload) { return post(Object.assign({ kind: 'submit' }, payload)); },
     comment: function (selector, text) { return post({ kind: 'comment', selector: selector, text: text }); },
     custom: function (payload) { return post(payload); },
+    // Live refresh for a board the AGENT keeps updating: poll a file in this
+    // share (e.g. data.json the agent re-pushes) and call cb(json) when it
+    // changes. Public, no token, no response leak. Returns the interval id.
+    // (Multi-viewer instant sync is the Durable-Object/websocket tier, later.)
+    poll: function (path, ms, cb) {
+      var last = null;
+      function tick() {
+        fetch('/' + cfg.slug + '/' + path, { cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.text() : null; })
+          .then(function (t) {
+            if (t == null || t === last) return;
+            last = t; try { cb(JSON.parse(t)); } catch (e) { cb(t); }
+          }).catch(function () {});
+      }
+      tick(); return setInterval(tick, ms || 5000);
+    },
   };
 })();
 `

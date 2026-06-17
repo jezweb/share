@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mark it up</title>
+<!--
+  annotate — tap anywhere on an image to drop a pin and leave a note. Each pin is
+  reported back via share.custom({ kind:'pin', x, y, text }) where x/y are
+  fractions (0-1) of the image, so the agent knows exactly WHERE the feedback is.
+
+  To use: replace IMAGE_SRC below with your image path (push it alongside this
+  page, e.g. img/mockup.png). No browser prompt()/alert() — the note input is an
+  inline overlay (browser dialogs would block the share runtime).
+-->
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0f1320;color:#e7ecf5}
+  .wrap{max-width:860px;margin:0 auto;padding:22px 16px 60px}
+  h1{font-size:21px;color:#fff;margin-bottom:4px}
+  .sub{color:#9aa6bd;font-size:14px;margin-bottom:18px}
+  .stage{position:relative;display:inline-block;width:100%;border-radius:14px;overflow:hidden;border:1px solid #243049;cursor:crosshair;user-select:none}
+  .stage img{display:block;width:100%;height:auto;pointer-events:none}
+  .pin{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50% 50% 50% 0;background:#5c8aff;border:2px solid #fff;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,.4);display:grid;place-items:center}
+  .pin b{transform:rotate(45deg);color:#fff;font-size:12px;font-weight:700}
+  .note{position:absolute;z-index:5;background:#1a2336;border:1px solid #34425f;border-radius:12px;padding:10px;width:230px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .note textarea{width:100%;min-height:54px;background:#0f1320;border:1px solid #34425f;border-radius:8px;color:#e7ecf5;font:inherit;font-size:13.5px;padding:8px;resize:vertical}
+  .note .row{display:flex;gap:8px;margin-top:8px}
+  .note button{flex:1;border:0;border-radius:8px;padding:8px;font-size:13px;font-weight:700;cursor:pointer}
+  .note .save{background:#5c8aff;color:#06122e}
+  .note .cancel{background:#2a3550;color:#aebbd6}
+  .list{margin-top:18px}
+  .list h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#7d8eaa;margin-bottom:8px}
+  .item{display:flex;gap:10px;align-items:flex-start;background:#161e30;border:1px solid #243049;border-radius:10px;padding:9px 11px;margin-bottom:7px;font-size:13.5px}
+  .item .n{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:#5c8aff;color:#06122e;display:grid;place-items:center;font-size:11px;font-weight:800}
+  .empty{color:#5f6f8e;font-size:13.5px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Tap the bits that need a change</h1>
+    <div class="sub">Click anywhere on the image to drop a pin and leave a note. Add as many as you like.</div>
+    <div class="stage" id="stage">
+      <img src="IMAGE_SRC" alt="">
+    </div>
+    <div class="list"><h2>Your notes</h2><div id="list"><div class="empty">No pins yet — tap the image above.</div></div></div>
+  </div>
+
+  <script src="/share.js"></script>
+  <script>
+    var stage=document.getElementById('stage'), list=document.getElementById('list');
+    var pins=[], openEditor=null;
+
+    stage.addEventListener('click', function(e){
+      if(openEditor) return;                 // a note editor is open; ignore stray clicks
+      if(e.target.closest('.pin')) return;
+      var r=stage.getBoundingClientRect();
+      var x=(e.clientX-r.left)/r.width, y=(e.clientY-r.top)/r.height;
+      editor(x,y);
+    });
+
+    function editor(x,y){
+      var box=document.createElement('div'); box.className='note';
+      box.style.left=Math.min(Math.max(x*stage.clientWidth,8),stage.clientWidth-238)+'px';
+      box.style.top=(y*stage.clientHeight+14)+'px';
+      box.innerHTML='<textarea placeholder="What needs to change here?"></textarea>'+
+        '<div class="row"><button class="cancel">cancel</button><button class="save">add pin</button></div>';
+      stage.appendChild(box); openEditor=box;
+      var ta=box.querySelector('textarea'); ta.focus();
+      box.querySelector('.cancel').onclick=function(){ box.remove(); openEditor=null; };
+      box.querySelector('.save').onclick=function(){
+        var text=ta.value.trim(); if(!text){ ta.focus(); return; }
+        box.remove(); openEditor=null; addPin(x,y,text);
+      };
+    }
+
+    function addPin(x,y,text){
+      var n=pins.length+1;
+      var p=document.createElement('div'); p.className='pin'; p.style.left=(x*100)+'%'; p.style.top=(y*100)+'%';
+      p.innerHTML='<b>'+n+'</b>'; stage.appendChild(p);
+      pins.push({n:n,x:x,y:y,text:text});
+      renderList();
+      share.custom({ kind:'pin', n:n, x:+x.toFixed(4), y:+y.toFixed(4), text:text });
+    }
+
+    function renderList(){
+      if(!pins.length){ list.innerHTML='<div class="empty">No pins yet — tap the image above.</div>'; return; }
+      list.innerHTML=pins.map(function(p){
+        return '<div class="item"><span class="n">'+p.n+'</span><span>'+p.text.replace(/</g,'&lt;')+'</span></div>';
+      }).join('');
+    }
+  </script>
+</body>
+</html>
