@@ -7,6 +7,11 @@ compatibility_date = "2026-06-01"
 # Custom domain on the jezweb.com zone (provisions DNS + managed cert).
 routes = [ { pattern = "share.jezweb.com", custom_domain = true } ]
 
+# Burndown cron — hourly sweep that retires expired shares (deletes their R2
+# objects + D1 rows). A share is disposable; it shouldn't linger past its TTL.
+[triggers]
+crons = [ "17 * * * *" ]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "share"

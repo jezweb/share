@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS shares (
   title       TEXT,
   created_at  INTEGER NOT NULL,
   expires_at  INTEGER,               -- NULL = no expiry; else unix seconds
-  meta        TEXT                    -- JSON: { keys: { <token>: <name> } } for per-person links
+  meta        TEXT,                   -- JSON: { keys: {<token>:<name>}, notify: <webhook-url> }
+  views       INTEGER NOT NULL DEFAULT 0,  -- times the index page has been served (opened?)
+  viewed_at   INTEGER                 -- unix seconds of the most recent view, NULL if never
 );
 
 CREATE INDEX IF NOT EXISTS idx_shares_slug ON shares(slug);

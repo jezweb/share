@@ -11,15 +11,22 @@
  * The agent ships the front end (static files it builds however it likes); it
  * NEVER ships worker code. The unguessable slug is the lock on the public routes.
  *
+ * The agent only ever needs SHARE_BASE + SHARE_TOKEN + HTTP. It reads answers
+ * back over the authed API by the SLUG it already holds — it NEVER touches D1,
+ * wrangler, or the Cloudflare account. D1/R2 are this worker's private storage.
+ *
  * Routes:
- *   POST /api/shares                       (auth) create a share, optionally with index html
- *   PUT  /api/shares/:slug/files/:path     (auth) put a file into the site (any depth)
- *   GET  /api/shares/:id/responses         (auth) read responses (the agent polls this)
- *   GET  /:slug                            (public) serve sites/<slug>/index.html
- *   GET  /:slug/:path                      (public) serve sites/<slug>/<path>
- *   POST /:slug/respond                    (public) capture a response to D1
- *   GET  /share.js                         (public) the client contract helper
- *   GET  /healthz                          (public) liveness
+ *   POST   /api/shares                     (auth) create a share, optionally with index html + a per-share notify webhook
+ *   PUT    /api/shares/:slug/files/:path   (auth) put a file into the site (any depth)
+ *   GET    /api/shares/:slug/files         (auth) list a share's files
+ *   GET    /api/shares/:ref/responses      (auth) read responses, by slug (preferred) or id
+ *   DELETE /api/shares/:slug               (auth) retire a share now (burndown)
+ *   GET    /:slug                          (public) serve sites/<slug>/index.html
+ *   GET    /:slug/:path                    (public) serve sites/<slug>/<path>
+ *   POST   /:slug/respond                  (public) capture a response; fires the per-share notify webhook
+ *   GET    /share.js                       (public) the client contract helper
+ *   GET    /healthz                        (public) liveness
+ *   (cron) scheduled                       burndown: delete expired shares (objects + rows)
  */
 import { Hono } from 'hono'
 
@@ -69,6 +76,21 @@ type ShareRow = { id: string; expires_at: number | null; meta: string | null }
 const getShare = (c: any, slug: string): Promise<ShareRow | null> =>
   c.env.DB.prepare('SELECT id, expires_at, meta FROM shares WHERE slug = ?').bind(slug).first()
 const isExpired = (s: ShareRow) => !!s.expires_at && s.expires_at < now()
+
+// Resolve a share by the SLUG the agent already holds (preferred), or by id for
+// back-compat. This is the only identifier path the agent needs: it reads answers
+// back over the authed HTTP API, never by touching D1/wrangler itself.
+type Resolved = { id: string; slug: string; views: number; viewed_at: number | null }
+const resolveShare = async (c: any, ref: string): Promise<Resolved | null> => {
+  const cols = 'id, slug, views, viewed_at'
+  if (okSlug(ref)) {
+    const bySlug = await c.env.DB
+      .prepare(`SELECT ${cols} FROM shares WHERE slug = ?`).bind(ref).first()
+    if (bySlug) return bySlug as Resolved
+  }
+  return (await c.env.DB
+    .prepare(`SELECT ${cols} FROM shares WHERE id = ?`).bind(ref).first()) as Resolved | null
+}
 
 // Inject, right after <head>: a <base> so relative URLs (sub-pages, css, images)
 // resolve UNDER the share's folder, plus the config + helper so any page can call
@@ -143,6 +165,7 @@ app.post('/api/shares', async (c) => {
   if (!authed(c)) return c.json({ error: 'unauthorized' }, 401)
   const b = await c.req.json<{
     html?: string; title?: string; ttlHours?: number; recipients?: string[]
+    notify?: string
   }>().catch(() => ({} as any))
 
   const id = crypto.randomUUID()
@@ -155,7 +178,13 @@ app.post('/api/shares', async (c) => {
   for (const name of b.recipients ?? []) {
     const k = randomToken(8); keys[k] = name; recipientLinks.push({ name, key: k })
   }
-  const meta = recipientLinks.length ? JSON.stringify({ keys }) : null
+  // Per-share notify webhook — set by the agent that authors THIS page, so each
+  // share can ping a different place (a Chat space, a generic URL). Only http(s).
+  const notify = typeof b.notify === 'string' && /^https?:\/\//i.test(b.notify) ? b.notify : null
+  const metaObj: Record<string, unknown> = {}
+  if (recipientLinks.length) metaObj.keys = keys
+  if (notify) metaObj.notify = notify
+  const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null
 
   await c.env.DB.prepare(
     'INSERT INTO shares (id, slug, title, created_at, expires_at, meta) VALUES (?, ?, ?, ?, ?, ?)',
@@ -171,7 +200,10 @@ app.post('/api/shares', async (c) => {
   const url = `${origin}/${slug}`
   return c.json({
     id, slug, url, expiresAt: expires,
+    // The agent reads answers back HERE, by slug, over HTTP — never via D1.
+    responsesUrl: `${origin}/api/shares/${slug}/responses`,
     uploadFileExample: `PUT ${origin}/api/shares/${slug}/files/<path>`,
+    notify: notify ?? undefined,
     links: recipientLinks.length
       ? recipientLinks.map((r) => ({ name: r.name, url: `${url}?k=${r.key}` }))
       : [{ name: null, url }],
@@ -210,17 +242,33 @@ app.get('/api/shares/:slug/files', async (c) => {
   return c.json({ slug, files: listed.objects.map((o: R2Object) => o.key.slice(prefix.length)) })
 })
 
-// Read responses (the agent, or its heartbeat, polls this).
-app.get('/api/shares/:id/responses', async (c) => {
+// Read responses. The agent polls THIS by the SLUG it already holds — the only
+// read path it needs. No D1, no wrangler, no Cloudflare access: just this authed
+// URL + the bearer token. :ref accepts the slug (preferred) or the id (back-compat).
+app.get('/api/shares/:ref/responses', async (c) => {
   if (!authed(c)) return c.json({ error: 'unauthorized' }, 401)
-  const id = c.req.param('id')
+  const share = await resolveShare(c, c.req.param('ref'))
+  if (!share) return c.json({ error: 'no such share' }, 404)
   const { results } = await c.env.DB.prepare(
     'SELECT responder, data, created_at FROM responses WHERE share_id = ? ORDER BY created_at ASC',
-  ).bind(id).all<{ responder: string | null; data: string; created_at: number }>()
+  ).bind(share.id).all<{ responder: string | null; data: string; created_at: number }>()
   return c.json({
-    id, count: results.length,
+    slug: share.slug, id: share.id, count: results.length,
+    opened: share.views > 0, views: share.views, viewedAt: share.viewed_at,
     responses: results.map((r) => ({ responder: r.responder, data: safeParse(r.data), at: r.created_at })),
   })
+})
+
+// Retire a share NOW (burndown on demand): delete its files from R2 and its rows
+// from D1. Idempotent — a missing share is already "done".
+app.delete('/api/shares/:slug', async (c) => {
+  if (!authed(c)) return c.json({ error: 'unauthorized' }, 401)
+  const slug = c.req.param('slug')
+  if (!okSlug(slug)) return c.json({ error: 'no such share' }, 404)
+  const share = await getShare(c, slug)
+  if (!share) return c.json({ ok: true, alreadyGone: true })
+  await burnShare(c.env, slug, share.id)
+  return c.json({ ok: true, retired: slug })
 })
 
 // ---- public: capture + serve -----------------------------------------------
@@ -235,12 +283,32 @@ app.post('/:slug/respond', async (c) => {
 
   const body = await c.req.json<{ k?: string; data?: unknown }>().catch(() => ({} as any))
   let responder: string | null = null
-  if (body.k && share.meta) {
-    try { responder = (JSON.parse(share.meta).keys || {})[body.k] || null } catch { /* ignore */ }
+  let notify: string | null = null
+  if (share.meta) {
+    try {
+      const m = JSON.parse(share.meta)
+      if (body.k) responder = (m.keys || {})[body.k] || null
+      if (typeof m.notify === 'string') notify = m.notify
+    } catch { /* ignore */ }
   }
+  const at = now()
   await c.env.DB.prepare(
     'INSERT INTO responses (id, share_id, responder, data, created_at) VALUES (?, ?, ?, ?, ?)',
-  ).bind(crypto.randomUUID(), share.id, responder, JSON.stringify(body.data ?? null), now()).run()
+  ).bind(crypto.randomUUID(), share.id, responder, JSON.stringify(body.data ?? null), at).run()
+
+  // Per-share webhook: ping the place this page's author chose, the moment an
+  // answer lands. Fire-and-forget so a slow/broken webhook never blocks the
+  // responder. Google Chat wants { text }; everything else gets the full JSON.
+  if (notify) {
+    const origin = new URL(c.req.url).origin
+    const payload = { slug, responder, data: body.data ?? null, at, url: `${origin}/${slug}` }
+    const isChat = /chat\.googleapis\.com/i.test(notify)
+    const reqInit: RequestInit = isChat
+      ? { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: `📨 *${slug}* answered${responder ? ` by ${responder}` : ''}:\n\`\`\`\n${JSON.stringify(body.data ?? null)}\n\`\`\`` }) }
+      : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }
+    c.executionCtx.waitUntil(fetch(notify, reqInit).catch(() => {}))
+  }
   return c.json({ ok: true })
 })
 
@@ -266,6 +334,15 @@ async function serveFile(c: any, slug: string, path: string): Promise<Response> 
 
   const ct = obj.httpMetadata?.contentType
   if (looksHtml(path, ct)) {
+    // Count a "view" when the index page is served — the agent uses this to know
+    // whether the person has even opened it before nudging. Best-effort, off the
+    // response path. Sub-pages and assets don't count (one open = one view).
+    if (path === 'index.html') {
+      c.executionCtx.waitUntil(
+        c.env.DB.prepare('UPDATE shares SET views = views + 1, viewed_at = ? WHERE slug = ?')
+          .bind(now(), slug).run().catch(() => {}),
+      )
+    }
     const html = injectShareRuntime(await obj.text(), slug)
     return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } })
   }
@@ -280,4 +357,35 @@ async function serveFile(c: any, slug: string, path: string): Promise<Response> 
 
 function safeParse(s: string): unknown { try { return JSON.parse(s) } catch { return s } }
 
-export default app
+// Burndown: delete one share's R2 objects (the whole sites/<slug>/ folder) and
+// its D1 rows. Paged R2 delete keeps it safe for sites with many files.
+async function burnShare(env: Bindings, slug: string, shareId: string): Promise<void> {
+  const prefix = `sites/${slug}/`
+  let cursor: string | undefined
+  do {
+    const listed = await env.ASSETS.list({ prefix, cursor })
+    if (listed.objects.length) await env.ASSETS.delete(listed.objects.map((o) => o.key))
+    cursor = listed.truncated ? listed.cursor : undefined
+  } while (cursor)
+  await env.DB.prepare('DELETE FROM responses WHERE share_id = ?').bind(shareId).run()
+  await env.DB.prepare('DELETE FROM shares WHERE id = ?').bind(shareId).run()
+}
+
+// Scheduled burndown: retire every share whose TTL has passed. A share is a
+// disposable view — "burns down once it's done" — so expired bytes don't linger
+// in R2/D1. Runs on the cron in wrangler.toml.
+async function scheduledBurndown(env: Bindings): Promise<number> {
+  const ts = Math.floor(Date.now() / 1000)
+  const { results } = await env.DB.prepare(
+    'SELECT id, slug FROM shares WHERE expires_at IS NOT NULL AND expires_at < ?',
+  ).bind(ts).all<{ id: string; slug: string }>()
+  for (const s of results) await burnShare(env, s.slug, s.id)
+  return results.length
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled: async (_event: ScheduledController, env: Bindings, ctx: ExecutionContext) => {
+    ctx.waitUntil(scheduledBurndown(env).then(() => {}))
+  },
+}

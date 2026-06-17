@@ -45,8 +45,11 @@ mime() { local m
 if [ -n "${SHARE_SLUG:-}" ]; then
   SLUG="$SHARE_SLUG"
 else
+  # Optional per-share notify webhook (a Chat space, a generic URL) via SHARE_NOTIFY.
+  NOTIFY_JSON=""
+  [ -n "${SHARE_NOTIFY:-}" ] && NOTIFY_JSON=",\"notify\":$(printf '%s' "$SHARE_NOTIFY" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read().strip()))')"
   SLUG=$(curl -s -X POST -H "Authorization: Bearer $SHARE_TOKEN" -H "content-type: application/json" \
-    -d "{\"title\":$(printf '%s' "$TITLE" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))'),\"ttlHours\":${SHARE_TTL:-168}}" \
+    -d "{\"title\":$(printf '%s' "$TITLE" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))'),\"ttlHours\":${SHARE_TTL:-168}${NOTIFY_JSON}}" \
     "$SHARE_BASE/api/shares" | sed -n 's/.*"slug":"\([^"]*\)".*/\1/p')
 fi
 [ -n "$SLUG" ] || { echo "failed to create/resolve share" >&2; exit 1; }
@@ -59,3 +62,5 @@ fi
   done )
 
 echo "$SHARE_BASE/$SLUG"
+echo "  responses: $SHARE_BASE/api/shares/$SLUG/responses" >&2
+echo "  read them: SHARE_BASE=$SHARE_BASE SHARE_TOKEN=… ./responses.sh $SLUG" >&2
