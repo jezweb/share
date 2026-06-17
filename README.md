@@ -62,9 +62,13 @@ SHARE_BASE=… SHARE_TOKEN=… scripts/push.sh ./site "Quote draft"
 curl -X PUT -H "Authorization: Bearer $SHARE_TOKEN" --data-binary @hero.png \
   -H "content-type: image/png" "$SHARE_BASE/api/shares/<slug>/files/img/hero.png"
 
-# read the answer (or let your next heartbeat run do it)
-curl -H "Authorization: Bearer $SHARE_TOKEN" "$SHARE_BASE/api/shares/<id>/responses"
+# read the answer back BY SLUG, over HTTP (or let your next heartbeat run do it)
+SHARE_BASE=… SHARE_TOKEN=… scripts/responses.sh <slug>
 ```
+
+The agent needs only `SHARE_BASE` + `SHARE_TOKEN` + HTTP. It reads answers from an
+authed URL keyed by the **slug it already holds** — it never queries D1, runs
+wrangler, or touches the Cloudflare account. D1/R2 are the worker's private store.
 
 ### A share is a folder — one page or a whole site
 
@@ -76,11 +80,27 @@ To iterate on a published one, `scripts/pull.sh <slug> ./site`, edit, push again
 R2 is not a mounted filesystem — you don't grep it in place; you grep your local
 copy and re-publish.
 
-### The contract: `share.js`
+### You build the page; components handle the interactive bits
 
-Every page includes `<script src="/share.js"></script>` and reports back through one
-helper: `share.submit({choice:'B'})`, `share.comment('#hero','too busy')`, or
-`share.custom({...})`. Build whatever UI you like; that one call is the only contract.
+The agent authors **whatever page it wants** (free-form HTML). For the parts that
+*capture an answer*, it drops in a ready-made component from `share-ui.js` instead
+of hand-writing event handlers — so the fiddly interaction logic (and its bugs)
+lives once, tested, not re-derived per page:
+
+```html
+<script src="/share.js"></script>      <!-- report-home contract -->
+<script src="/share-ui.js"></script>   <!-- drop-in components (optional) -->
+
+<div data-share-annotate data-src="img/mock.png"></div>   <!-- pin: add / edit / delete -->
+<div data-share-choice><button data-value="a">A</button><button data-value="b">B</button></div>
+<div data-share-rating data-max="5"></div>
+<div data-share-form>…your inputs…<button data-share-submit>Send</button></div>
+```
+
+The components are **optional, not a cage.** If they don't fit, write raw HTML and
+call the contract directly: `share.submit({choice:'B'})`,
+`share.comment('#hero','too busy')`, `share.custom({…})`. That one call is the only
+hard contract.
 
 ### Access
 
@@ -90,11 +110,18 @@ one keyed link per person; each response records the responder.
 
 ### Getting the answer back
 
-The answer is retrievable by id, forever. Don't design around the session waiting:
-record the id and let the next heartbeat / scheduled run read the responses and act.
-For a short live moment, poll for a minute or two. Faster live-session pickup (an
-`asyncRewake` watcher hook, or Claude Code channels once out of preview) is a later
-nicety, not required.
+Retrievable by **slug**, forever, over HTTP. Don't design around the session
+waiting: record the slug and let the next heartbeat read the responses and act. The
+payload also reports `opened`/`views`/`viewedAt`, so you nudge only when it makes
+sense. Want a push instead of a poll? Set a **per-share notify webhook** on create
+(Google Chat or any URL) and the worker pings it the moment an answer lands.
+
+### Live boards & burndown
+
+For a board you keep updating, the page can `share.poll(path, ms, cb)` to re-render
+when you re-push a data file (public, no token). A share is disposable: it
+auto-deletes at its TTL (hourly cron), or `DELETE /api/shares/<slug>` retires it now.
+Instant multi-viewer sync is the Durable-Object/websocket tier (later).
 
 ## Repo layout
 
@@ -104,21 +131,27 @@ share/
     src/index.ts           host + capture + files + responses API
     schema.sql             D1 tables (share metadata + responses)
     wrangler.toml          route = share.jezweb.com, D1 + R2 bindings
+    src/share-ui-src.ts      the drop-in component runtime (served at /share-ui.js)
   scripts/push.sh          publish a local dir as a share (build local, push the tree)
   scripts/pull.sh          download a share to edit + re-push (the round-trip)
+  scripts/responses.sh     read a share's answers back by slug, over HTTP
+  scripts/genimage.mjs     generate an image via OpenRouter (designated key)
   templates/ab-choice.html a self-contained example using share.submit
+  templates/annotate.html  image markup via the data-share-annotate component
   skills/share/SKILL.md    when + how an agent uses it
   .claude-plugin/          plugin + marketplace manifests
 ```
 
 ## Status
 
-**v0.1 — foundation.** Worker (host + capture + R2 assets + authed API), the
-`share.js` contract, one template, the plugin skill. Not yet deployed.
+**v0.2 — live on `share.jezweb.com`.** Worker (host + capture + R2 assets + authed
+API), the `share.js` contract, the `share-ui.js` component runtime (annotate /
+choice / rating / form), hear-back by slug over HTTP, per-share notify webhooks,
+view analytics, lifecycle burndown (DELETE + hourly cron), and the plugin skill.
 
-Next: deploy to `share.jezweb.com` (D1 + R2 + `SHARE_TOKEN` secret), an MCP server so
-the agent gets clean `publish` / `responses` tools instead of curl, more templates
-(palette, matrix, annotate, board), and the first real dogfood.
+Next: an MCP server (shipped with the plugin) so the agent gets clean `publish` /
+`responses` tools alongside the curl path, more components, and the
+Durable-Object/websocket tier for instant multi-viewer live boards.
 
 ## Deploy (when ready)
 
