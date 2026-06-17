@@ -1,0 +1,12 @@
+{
+  "name": "share",
+  "description": "Publish a small, purpose-built web page for a person beyond the terminal, share it as one unguessable link, and read their structured answer back. Disposable pages on one always-on Cloudflare worker; images sidecar to R2 so bytes never touch the model context.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jeremy Dawes",
+    "email": "jeremy@jezweb.net"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/jezweb/share",
+  "repository": "https://github.com/jezweb/share"
+}

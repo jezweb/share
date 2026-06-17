@@ -1,0 +1,14 @@
+{
+  "name": "share",
+  "owner": {
+    "name": "Jeremy Dawes",
+    "email": "jeremy@jezweb.net"
+  },
+  "plugins": [
+    {
+      "name": "share",
+      "source": "./",
+      "description": "Put an agent-authored page in front of a person beyond the terminal and hear back: pick a direction, approve a quote, mark up a mockup, a living board, or just show something. One link, structured answer back."
+    }
+  ]
+}

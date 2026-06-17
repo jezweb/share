@@ -1,0 +1,25 @@
+name = "share"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# v1 home. custom_domain provisions the cert + route for share.jezweb.com.
+# (Set up at deploy time; needs the zone in this Cloudflare account.)
+routes = [
+  { pattern = "share.jezweb.com", custom_domain = true }
+]
+
+# D1 — fill database_id after `wrangler d1 create share`.
+[[d1_databases]]
+binding = "DB"
+database_name = "share"
+database_id = "REPLACE_AT_INIT"
+
+# R2 — big files (images, video) live here, NOT in D1 and NOT in the model context.
+# The agent curls bytes straight to /api/assets; the page references /a/<key>.
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "share-assets"
+
+# SHARE_TOKEN is a secret, NOT in this file:
+#   wrangler secret put SHARE_TOKEN
+# The agent sends it as `Authorization: Bearer <token>` on /api/* calls.
